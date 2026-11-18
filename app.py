@@ -1,14 +1,22 @@
+import hashlib
+import hmac
 import logging
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 from google import genai
 
-# .env 파일에서 환경변수(GEMINI_API_KEY 등)를 불러옵니다.
+# .env 파일에서 환경변수(GEMINI_API_KEY, APP_PASSWORD 등)를 불러옵니다.
 load_dotenv()
 
 app = Flask(__name__)
+
+# Vercel 등 서버리스 환경에서도 로그인 쿠키가 유지되도록 비밀번호 기반으로 고정 서명키를 생성합니다.
+_raw_secret = os.getenv("FLASK_SECRET_KEY", "").strip() or os.getenv("APP_PASSWORD", "").strip() or "dev-fallback-secret"
+app.secret_key = hashlib.sha256(f"usw-doc-draft:{_raw_secret}".encode("utf-8")).hexdigest()
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # 서버 콘솔에 오류 로그를 남기기 위한 기본 설정입니다.
 logging.basicConfig(
@@ -18,6 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-3.5-flash-lite"
+MIN_PASSWORD_LENGTH = 8
 
 ALLOWED_DOC_TYPES = {
     "보도자료",
@@ -26,6 +35,21 @@ ALLOWED_DOC_TYPES = {
     "결과 보고",
     "업무 메일",
 }
+
+
+def get_app_password() -> str:
+    """환경변수에서 사이트 접속 비밀번호를 읽어옵니다."""
+    return os.getenv("APP_PASSWORD", "").strip()
+
+
+def is_password_configured() -> bool:
+    """접속 비밀번호가 8자리 이상으로 올바르게 설정되었는지 확인합니다."""
+    return len(get_app_password()) >= MIN_PASSWORD_LENGTH
+
+
+def is_authenticated() -> bool:
+    """현재 사용자가 비밀번호 인증을 완료했는지 확인합니다."""
+    return bool(session.get("authenticated"))
 
 
 def format_input_facts(data: dict) -> str:
@@ -76,12 +100,68 @@ def build_prompt(data: dict) -> str:
 @app.route("/", methods=["GET"])
 def index():
     """메인 웹 화면을 보여줍니다."""
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        authenticated=is_authenticated(),
+        password_configured=is_password_configured(),
+    )
+
+
+@app.route("/sw.js", methods=["GET"])
+def service_worker():
+    """PWA 서비스 워커를 루트 경로(/sw.js)에서 제공합니다."""
+    return app.send_static_file("sw.js")
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    """접속 비밀번호를 확인하고 세션을 인증합니다."""
+    if not is_password_configured():
+        logger.error("APP_PASSWORD 환경변수가 없거나 8자리 미만입니다.")
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "서버에 8자리 이상의 접속 비밀번호(APP_PASSWORD)가 설정되지 않았습니다. "
+                        ".env 또는 Vercel 환경변수를 확인해 주세요."
+                    )
+                }
+            ),
+            500,
+        )
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "올바른 요청 형식이 아닙니다."}), 400
+
+    entered = (data.get("password") or "").strip()
+    if len(entered) < MIN_PASSWORD_LENGTH:
+        return jsonify({"error": "비밀번호는 8자리 이상 입력해 주세요."}), 400
+
+    expected = get_app_password()
+    if not hmac.compare_digest(entered, expected):
+        return jsonify({"error": "비밀번호가 올바르지 않습니다. 다시 확인해 주세요."}), 401
+
+    session["authenticated"] = True
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    """현재 브라우저의 인증 세션을 잠급니다."""
+    session.pop("authenticated", None)
+    return jsonify({"ok": True}), 200
 
 
 @app.route("/api/generate", methods=["POST"])
 def generate_draft():
     """입력값을 검증하고 Gemini API를 호출해 문서 초안을 반환합니다."""
+    if not is_authenticated():
+        return (
+            jsonify({"error": "접속 비밀번호 인증이 필요합니다. 비밀번호를 먼저 입력해 주세요."}),
+            401,
+        )
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "올바른 요청 형식이 아닙니다. 다시 시도해 주세요."}), 400

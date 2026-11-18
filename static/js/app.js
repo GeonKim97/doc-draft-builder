@@ -1,4 +1,144 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const authGate = document.getElementById("authGate");
+  const authForm = document.getElementById("authForm");
+  const authPasswordInput = document.getElementById("authPasswordInput");
+  const authError = document.getElementById("authError");
+  const authSubmitBtn = document.getElementById("authSubmitBtn");
+  const appContent = document.getElementById("appContent");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  const pwaInstallBanner = document.getElementById("pwaInstallBanner");
+  const pwaBannerDesc = document.getElementById("pwaBannerDesc");
+  const pwaInstallBtn = document.getElementById("pwaInstallBtn");
+  const pwaLaterBtn = document.getElementById("pwaLaterBtn");
+
+  // PWA 서비스 워커 등록
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+
+  // PWA 설치 안내 (안드로이드 크롬 + 아이폰 사파리)
+  const PWA_DISMISS_KEY = "uswPwaInstallDismissedUntil";
+  let deferredInstallPrompt = null;
+
+  function isStandaloneMode() {
+    return (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true
+    );
+  }
+
+  function isDismissedRecently() {
+    try {
+      const until = Number(localStorage.getItem(PWA_DISMISS_KEY) || "0");
+      return Date.now() < until;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isIosSafari() {
+    const ua = window.navigator.userAgent;
+    const isIos = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+    return isIos && isSafari;
+  }
+
+  function showPwaBanner(mode) {
+    if (isStandaloneMode() || isDismissedRecently()) return;
+    if (mode === "ios") {
+      pwaBannerDesc.textContent = "하단 공유 버튼(□↑)을 누른 뒤 '홈 화면에 추가'를 선택해 설치하세요.";
+      pwaInstallBtn.classList.add("hidden");
+    } else {
+      pwaBannerDesc.textContent = "홈 화면에 추가하면 앱처럼 바로 열 수 있습니다.";
+      pwaInstallBtn.classList.remove("hidden");
+    }
+    pwaInstallBanner.classList.remove("hidden");
+  }
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    showPwaBanner("android");
+  });
+
+  if (isIosSafari() && !isStandaloneMode()) {
+    setTimeout(() => showPwaBanner("ios"), 1200);
+  }
+
+  pwaInstallBtn.addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (result && result.outcome === "accepted") {
+      pwaInstallBanner.classList.add("hidden");
+    }
+  });
+
+  pwaLaterBtn.addEventListener("click", () => {
+    pwaInstallBanner.classList.add("hidden");
+    try {
+      // '나중에' 클릭 시 7일간 다시 띄우지 않음
+      localStorage.setItem(PWA_DISMISS_KEY, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    } catch (e) {}
+  });
+
+  // 접속 비밀번호 인증 처리
+  function showAuthError(message) {
+    authError.textContent = message;
+    authError.classList.remove("hidden");
+  }
+
+  authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    authError.classList.add("hidden");
+    const password = authPasswordInput.value.trim();
+
+    if (password.length < 8) {
+      showAuthError("비밀번호는 8자리 이상 입력해 주세요.");
+      authPasswordInput.focus();
+      return;
+    }
+
+    authSubmitBtn.disabled = true;
+    authSubmitBtn.textContent = "확인 중...";
+
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        showAuthError(data.error || "비밀번호 확인에 실패했습니다.");
+        return;
+      }
+
+      authPasswordInput.value = "";
+      authGate.classList.add("hidden");
+      appContent.classList.remove("hidden");
+      logoutBtn.classList.remove("hidden");
+    } catch (error) {
+      showAuthError("서버와 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      authSubmitBtn.disabled = false;
+      authSubmitBtn.textContent = "잠금 해제";
+    }
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch (e) {}
+    appContent.classList.add("hidden");
+    logoutBtn.classList.add("hidden");
+    authGate.classList.remove("hidden");
+    authPasswordInput.focus();
+  });
+
   const form = document.getElementById("draftForm");
   const docTypeInput = document.getElementById("docType");
   const titleInput = document.getElementById("title");
