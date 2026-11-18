@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>수원대학교 행정 업무 문서 초안 생성기</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+  <div class="top-accent-bar" aria-hidden="true"></div>
+  <div class="container">
+    <header class="page-header">
+      <div class="brand-bar">
+        <div class="logo-wrap">
+          <img
+            src="{{ url_for('static', filename='img/suwon_logo.png') }}"
+            alt="수원대학교 로고"
+            class="university-logo"
+          />
+        </div>
+        <span class="hero-badge">✨ USW AI 행정 업무 비서 · Gemini</span>
+      </div>
+      <h1>수원대학교 행정 업무 문서 초안 생성기</h1>
+      <p class="subtitle">문서 종류와 핵심 사실을 입력하면 Gemini가 수원대학교 행정 스타일에 맞는 업무 문서 초안을 작성해 드립니다.</p>
+    </header>
+
+    <main class="main-grid">
+      <!-- 왼쪽: 입력 영역 -->
+      <section class="card">
+        <div class="section-header">
+          <h2>1. 문서 정보 입력</h2>
+          <button type="button" id="fillSampleBtn" class="btn-secondary">예시 채우기</button>
+        </div>
+
+        <form id="draftForm" novalidate>
+          <div class="form-group">
+            <label for="docType">문서 종류 <span class="required">*</span></label>
+            <select id="docType" name="doc_type" required>
+              <option value="">-- 문서 종류를 선택하세요 --</option>
+              <option value="보도자료">보도자료</option>
+              <option value="안내문">안내문</option>
+              <option value="기안문">기안문</option>
+              <option value="결과 보고">결과 보고</option>
+              <option value="업무 메일">업무 메일</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="title">제목 <span class="required">*</span></label>
+            <input
+              type="text"
+              id="title"
+              name="title"
+              placeholder="예: 2026학년도 2학기 교직원 AI 활용 특강 안내"
+              required
+            />
+          </div>
+
+          <div class="facts-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+              <h3 style="margin: 0;">핵심 사실 카드 (비워 두어도 됩니다)</h3>
+              <div class="result-actions">
+                <button type="button" id="saveFactsBtn" class="btn-secondary">저장</button>
+                <button type="button" id="loadFactsBtn" class="btn-secondary">불러오기</button>
+              </div>
+            </div>
+            <div class="facts-grid">
+              <div class="form-group">
+                <label for="factDateTime">일시</label>
+                <input type="text" id="factDateTime" placeholder="예: 2026. 11. 25.(수) 14:00~16:00" />
+              </div>
+
+              <div class="form-group">
+                <label for="factLocation">장소</label>
+                <input type="text" id="factLocation" placeholder="예: 본관 3층 대회의실" />
+              </div>
+
+              <div class="form-group">
+                <label for="factTarget">대상</label>
+                <input type="text" id="factTarget" placeholder="예: 전 교직원" />
+              </div>
+
+              <div class="form-group">
+                <label for="factApply">신청 방법</label>
+                <input type="text" id="factApply" placeholder="예: 포털 시스템 온라인 신청" />
+              </div>
+
+              <div class="form-group full-width">
+                <label for="factContact">문의처</label>
+                <input type="text" id="factContact" placeholder="예: 총무과 홍길동 주무관 (내선 1234)" />
+              </div>
+            </div>
+            <p id="factsStorageMsg" class="hidden" style="margin: 10px 0 0; font-size: 0.85rem; color: #003670; font-weight: 600;"></p>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="recipient">받는 사람</label>
+              <input type="text" id="recipient" placeholder="예: 전체 단과대학 행정실" />
+            </div>
+
+            <div class="form-group">
+              <label for="tone">어조</label>
+              <select id="tone" name="tone">
+                <option value="공식적">공식적</option>
+                <option value="친근한">친근한</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="label-text">Prompt 선택</span>
+            <div class="radio-group">
+              <label class="radio-option">
+                <input type="radio" name="promptType" value="A" checked />
+                <span>
+                  <strong>Prompt A</strong> (기본 작성: 입력 정보로 초안만 작성)
+                </span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="promptType" value="B" />
+                <span>
+                  <strong>Prompt B</strong> (행정 체크리스트 적용 · 없는 내용은 <code>[확인 필요]</code> 표시)
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 오류/필수 입력 안내 메시지 -->
+          <div id="errorMessage" class="alert-error hidden" role="alert"></div>
+
+          <button type="submit" id="generateBtn" class="btn-primary">초안 생성</button>
+        </form>
+      </section>
+
+      <!-- 오른쪽: 결과 영역 -->
+      <section class="card result-card">
+        <div class="result-header">
+          <h2>2. 생성된 초안</h2>
+          <div class="result-actions">
+            <button type="button" id="copyBtn" class="btn-secondary" disabled>복사</button>
+            <button type="button" id="downloadBtn" class="btn-secondary" disabled>.md 다운로드</button>
+          </div>
+        </div>
+
+        <div id="loadingIndicator" class="loading-box hidden">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>생성 중... 잠시만 기다려 주세요.</span>
+        </div>
+
+        <div id="statusMessage" class="status-message hidden"></div>
+
+        <div class="view-tabs">
+          <button type="button" id="previewTabBtn" class="tab-btn active">미리보기 (읽기 좋게 보기)</button>
+          <button type="button" id="editTabBtn" class="tab-btn">직접 수정하기</button>
+        </div>
+
+        <div id="resultPreview" class="result-box markdown-body">
+          <p class="placeholder-text">여기에 생성된 문서 초안이 보기 좋게 표시됩니다.</p>
+        </div>
+
+        <textarea
+          id="resultEditor"
+          class="result-editor hidden"
+          placeholder="초안이 생성되면 이곳에서 내용을 직접 수정할 수 있습니다."
+        ></textarea>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
